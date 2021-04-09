@@ -40,6 +40,31 @@ public class ConstantFolder
 			e.printStackTrace();
 		}
 	}
+
+	private ArrayList<Integer> findLoops(InstructionList iList)
+	{
+		ArrayList<Integer> lPos = new ArrayList<>();
+
+		for (InstructionHandle handle : iList.getInstructionHandles()) {
+			Instruction inst = handle.getInstruction();
+
+			if (inst instanceof IINC) {
+				InstructionHandle nextInstructionHandle = handle.getNext();
+				Instruction nextInstruction = nextInstructionHandle.getInstruction();
+				Integer index = ((IINC) inst).getIndex();
+				if (nextInstruction instanceof GotoInstruction) {
+					InstructionHandle targetHandle = ((GotoInstruction) nextInstruction).getTarget();
+					Integer start = targetHandle.getPosition() - 2;
+					lPos.add(start);
+					lPos.add(nextInstructionHandle.getPosition());
+					lPos.add(index);
+				}
+			}
+
+		}
+		return lPos;
+	}
+
 	
 	public void optimize()
 	{
@@ -72,6 +97,14 @@ public class ConstantFolder
 		mg.removeNOPs();
 		constantStack = new Stack<Number>();
 		vars = new HashMap<Integer, Number>();
+
+		boolean skipNextArith = false;
+
+		boolean justDeletedIf = false;
+
+		int constants = 0;
+		ArrayList<Integer> arrayForLoops = findLoops(instList);
+
 
 		// InstructionHandle is a wrapper for actual Instructions
 		for (InstructionHandle handle : instList.getInstructionHandles())
