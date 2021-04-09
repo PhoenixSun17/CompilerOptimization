@@ -27,6 +27,9 @@ public class ConstantFolder
 	JavaClass original = null;
 	JavaClass optimized = null;
 
+	Stack<Number> constantStack = null;
+	HashMap<Integer, Number> vars = null;
+
 	public ConstantFolder(String classFilePath)
 	{
 		try{
@@ -64,7 +67,11 @@ public class ConstantFolder
 		InstructionList instList = new InstructionList(methodCode.getCode());
 
 		// Initialise a method generator with the original method as the baseline
-		MethodGen methodGen = new MethodGen(method.getAccessFlags(), method.getReturnType(), method.getArgumentTypes(), null, method.getName(), cgen.getClassName(), instList, cpgen);
+		MethodGen mg = new MethodGen(method.getAccessFlags(), method.getReturnType(), method.getArgumentTypes(), null, method.getName(), cgen.getClassName(), instList, cpgen);
+
+		mg.removeNOPs();
+		constantStack = new Stack<Number>();
+		vars = new HashMap<Integer, Number>();
 
 		// InstructionHandle is a wrapper for actual Instructions
 		for (InstructionHandle handle : instList.getInstructionHandles())
@@ -93,11 +100,11 @@ public class ConstantFolder
 		instList.setPositions(true);
 
 		// set max stack/local
-		methodGen.setMaxStack();
-		methodGen.setMaxLocals();
+		mg.setMaxStack();
+		mg.setMaxLocals();
 
 		// generate the new method with replaced iconst
-		Method newMethod = methodGen.getMethod();
+		Method newMethod = mg.getMethod();
 		// replace the method in the original class
 		cgen.replaceMethod(method, newMethod);
 
