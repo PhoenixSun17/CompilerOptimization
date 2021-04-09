@@ -3,20 +3,17 @@ import java.io.File;
 import java.io.FileNotFoundException;
 import java.io.FileOutputStream;
 import java.io.IOException;
+import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.Iterator;
+import java.util.Stack;
 
 import org.apache.bcel.classfile.ClassParser;
 import org.apache.bcel.classfile.Code;
 import org.apache.bcel.classfile.JavaClass;
 import org.apache.bcel.classfile.Method;
-import org.apache.bcel.generic.ClassGen;
-import org.apache.bcel.generic.ConstantPoolGen;
-import org.apache.bcel.generic.InstructionHandle;
-import org.apache.bcel.generic.InstructionList;
+import org.apache.bcel.generic.*;
 import org.apache.bcel.util.InstructionFinder;
-import org.apache.bcel.generic.MethodGen;
-import org.apache.bcel.generic.TargetLostException;
-
 
 
 public class ConstantFolder
@@ -65,7 +62,7 @@ public class ConstantFolder
 		return lPos;
 	}
 
-	
+
 	public void optimize()
 	{
 		ClassGen cgen = new ClassGen(original);
@@ -142,7 +139,82 @@ public class ConstantFolder
 		cgen.replaceMethod(method, newMethod);
 
 	}
-	
+
+	public void arithmeticOperation(InstructionHandle instHandler)
+	{
+		Number a = constantStack.pop();
+		Number b = constantStack.pop();
+		Number result = null;
+		if(instHandler.getInstruction() instanceof IADD)
+		{
+			result = b.intValue()+a.intValue();
+		}
+		else if(instHandler.getInstruction() instanceof LADD)
+		{
+			result = b.longValue()+a.longValue();
+		}
+		else if(instHandler.getInstruction() instanceof FADD)
+		{
+			result = b.floatValue()+a.floatValue();
+		}
+		else if(instHandler.getInstruction() instanceof DADD)
+		{
+			result = b.doubleValue()+a.doubleValue();
+		}
+		else if(instHandler.getInstruction() instanceof ISUB)
+		{
+			result = b.intValue()-a.intValue();
+		}
+		else if(instHandler.getInstruction() instanceof LSUB)
+		{
+			result = b.longValue()-a.longValue();
+		}
+		else if(instHandler.getInstruction() instanceof FSUB)
+		{
+			result = b.floatValue()-a.floatValue();
+		}
+		else if(instHandler.getInstruction() instanceof DSUB)
+		{
+			result = b.doubleValue()-a.doubleValue();
+		}
+		else if(instHandler.getInstruction() instanceof IMUL)
+		{
+			result = b.intValue()*a.intValue();
+		}
+		else if(instHandler.getInstruction() instanceof LMUL)
+		{
+			result = b.longValue()*a.longValue();
+		}
+		else if(instHandler.getInstruction() instanceof FMUL)
+		{
+			result = b.floatValue()*a.floatValue();
+		}
+		else if(instHandler.getInstruction() instanceof DMUL)
+		{
+			result = b.doubleValue()*a.doubleValue();
+		}
+		else if(instHandler.getInstruction() instanceof IDIV)
+		{
+			result = b.intValue()/a.intValue();
+		}
+		else if(instHandler.getInstruction() instanceof LDIV)
+		{
+			result = b.longValue()/a.longValue();
+		}
+		else if(instHandler.getInstruction() instanceof FDIV)
+		{
+			result = b.floatValue()/a.floatValue();
+		}
+		else if(instHandler.getInstruction() instanceof DDIV)
+		{
+			result = b.doubleValue()/a.doubleValue();
+		}
+
+		if(result != null)
+		{
+			constantStack.push(result);
+		}
+	}
 	public void write(String optimisedFilePath)
 	{
 		this.optimize();
