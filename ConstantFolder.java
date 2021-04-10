@@ -107,10 +107,6 @@ public class ConstantFolder
 		for (InstructionHandle handle : instList.getInstructionHandles())
 		{
 			// if the instruction inside is iconst
-			if (handle.getInstruction() instanceof ICONST)
-			{
-				// insert new one with integer 5, and...
-				instList.insert(handle, new ICONST(5));
 				try
 				{
 					// delete the old one
@@ -120,7 +116,11 @@ public class ConstantFolder
 				catch (TargetLostException e)
 				{
 					// TODO Auto-generated catch block
-					e.printStackTrace();
+					for (InstructionHandle target : e.getTargets()) {
+						for (InstructionTargeter targeter : target.getTargeters()) {
+							targeter.updateTarget(target, new_target);
+						}
+					}
 				}
 			}
 		}
