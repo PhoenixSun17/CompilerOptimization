@@ -91,6 +91,7 @@ public class ConstantFolder
 		// Initialise a method generator with the original method as the baseline
 		MethodGen mg = new MethodGen(method.getAccessFlags(), method.getReturnType(), method.getArgumentTypes(), null, method.getName(), cgen.getClassName(), instList, cpgen);
 
+		mg.removeNOPs();
 		constantStack = new Stack<Number>();
 		vars = new HashMap<Integer, Number>();
 
@@ -106,25 +107,22 @@ public class ConstantFolder
 		for (InstructionHandle handle : instList.getInstructionHandles())
 		{
 			// if the instruction inside is iconst
-			
-				try
-				{
-					// delete the old one
-					instList.delete(handle);
+			try
+			{
+				// delete the old one
+				instList.delete(handle);
 
-				}
-				catch (TargetLostException e)
-				{
-					// TODO Auto-generated catch block
-					for (InstructionHandle target : e.getTargets()) {
-						for (InstructionTargeter targeter : target.getTargeters()) {
-							targeter.updateTarget(target, new_target);
-						}
+			}
+			catch (TargetLostException e)
+			{
+				// TODO Auto-generated catch block
+				for (InstructionHandle target : e.getTargets()) {
+					for (InstructionTargeter targeter : target.getTargeters()) {
+						//targeter.updateTarget(target, new_target);
 					}
 				}
 			}
 		}
-
 		// setPositions(true) checks whether jump handles
 		// are all within the current method
 		instList.setPositions(true);
@@ -139,6 +137,10 @@ public class ConstantFolder
 		cgen.replaceMethod(method, newMethod);
 
 	}
+
+
+
+
 
 	public void arithmeticOperation(InstructionHandle instHandler)
 	{
