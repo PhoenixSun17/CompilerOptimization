@@ -161,14 +161,11 @@ public class ConstantFolder
 			Instruction inst = handle.getInstruction();
 			Number constant = null;
 			boolean isArithOp = (inst instanceof ArithmeticInstruction);
-			//for simple folding, only LDC, LDC_W, LDC2_W, BIPUSH, SIPUSH and ICONST have to be considered.
+			//for simple folding, only LDC, LDC2_W, BIPUSH, SIPUSH and ICONST have to be considered.
 			if (inst instanceof LDC && !nextIsStore){
 				constant = (Number)((LDC)inst).getValue(cpgen);
 				constantStack.push(constant);
 				//push the constant to the stack, when an arithmetical or logical operation is met, the top 2 constant will be pop from the stack.
-			} else if (inst instanceof LDC_W && !nextIsStore){
-				constant = (Number)((LDC_W)inst).getValue(cpgen);
-				constantStack.push(constant);
 			} else if (inst instanceof LDC2_W && !nextIsStore){
 				constant = (Number)((LDC2_W)inst).getValue(cpgen);
 				constantStack.push(constant);
