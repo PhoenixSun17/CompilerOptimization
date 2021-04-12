@@ -117,7 +117,7 @@ public class ConstantFolder
 
 		// Initialise a method generator with the original method as the baseline
 		MethodGen mg = new MethodGen(method.getAccessFlags(), method.getReturnType(), method.getArgumentTypes(), null, method.getName(), cgen.getClassName(), instList, cpgen);
-
+		doConstantVariableFolding(cgen,cpgen,instList);
 		mg.removeNOPs();
 		constantStack = new Stack<Number>();
 		vars = new HashMap<Integer, Number>();
@@ -203,6 +203,192 @@ public class ConstantFolder
 		}
 	}
 
+	/*private void doConstantVariableFold(ClassGen cgen, ConstantPoolGen cpgen, InstructionList il, InstructionHandle startHandle, InstructionHandle endHandle) {
+		System.out.println("* * Optimization 02: Constant Variable Folding --------------");
+
+		// Fill defaults
+		if (startHandle == null) {
+			startHandle = il.getStart();
+		}
+		if (endHandle == null) {
+			endHandle = il.getEnd();
+		}
+
+		// This hashmap stores all literal values that we know about.
+		HashMap<Integer,Number> literalValues = new HashMap<>();
+
+		// This hashmap stores a list of local variables that are *constant* for this method.
+		// constantVariables.get(index) is TRUE if the variable is constant.
+		HashMap<Integer, Boolean> constantVariables = new HashMap<>();
+
+		// Locate constant local variables that do not change for this method.
+		InstructionFinder f = new InstructionFinder(il);
+		String pattern = "StoreInstruction | IINC";
+		for (Iterator it = f.search(pattern, startHandle); it.hasNext(); ) {
+			InstructionHandle[] match = (InstructionHandle[]) it.next();
+
+			if (match[0].getPosition() > endHandle.getPosition()) {
+				continue;
+			}
+
+			int localVariableIndex = -1;
+
+			// match[0] expected to be StoreInstruction or IINC, as specified in the pattern.
+			if (match[0].getInstruction() instanceof StoreInstruction) {
+				localVariableIndex = ((StoreInstruction) match[0].getInstruction()).getIndex();
+			} else if (match[0].getInstruction() instanceof IINC) {
+				localVariableIndex = ((IINC) match[0].getInstruction()).getIndex();
+			}
+
+			// Assert we've assigned a value to localVariableIndex.
+			if (localVariableIndex == -1) {
+				System.err.println("FATAL: doConstantVariableFolding: localVariableIndex not assigned.");
+			}
+
+			System.out.format("storeInstruction: %s index: %s\n", match[0].getInstruction().getClass().getSimpleName(), localVariableIndex);
+
+			// See if we've already tracked this local variable.
+			if (!constantVariables.containsKey(localVariableIndex)) {
+				constantVariables.put(localVariableIndex, true);
+			} else {
+				// We've seen this index before.. mark it as NOT constant.
+				constantVariables.put(localVariableIndex, false);
+			}
+		}
+
+		// The loop will end when there are no longer any LoadInstructions whose index exists in the literalValues hashmap.
+		boolean foldedLoadInstruction;
+		do {
+			// Run simple folding to get as many literals as possible.
+			doSimpleFolding(cgen, cpgen, il);
+
+			// Store all literals in the hashmap.
+			// e.g. LDC #2, ISTORE_1
+			// e.g. SIPUSH 1234, ISTORE_2
+			f = new InstructionFinder(il);
+			String pattern2 = "(LDC | LDC2_W | LDC_W | ConstantPushInstruction) (DSTORE | FSTORE | ISTORE | LSTORE)";
+			for (Iterator it = f.search(pattern2); it.hasNext(); ) {
+				InstructionHandle[] match = (InstructionHandle[]) it.next();
+
+				// match[0] expected to be PushInstruction, as specified in the pattern (it's the superclass of the specified pattern).
+				PushInstruction pushInstruction = (PushInstruction) match[0].getInstruction();
+
+				// match[1] expected to be StoreInstruction, as specified in the pattern.
+				StoreInstruction storeInstruction = (StoreInstruction) match[1].getInstruction();
+
+				// Check if this store instruction is for a constant variable.
+				if (!constantVariables.containsKey(storeInstruction.getIndex()) || !constantVariables.get(storeInstruction.getIndex())) {
+					// If the variable isn't constant, skip this iteration.
+					continue;
+				}
+
+				Number literalValue = null;
+
+				// Get the constant value pushed.
+				if (pushInstruction instanceof ConstantPushInstruction) {
+					literalValue = ((ConstantPushInstruction) pushInstruction).getValue();
+				} else if (pushInstruction instanceof LDC) {
+					// LDC must be Number since we only accept ILOAD, FLOAD, etc.
+					literalValue = (Number) ((LDC) pushInstruction).getValue(cpgen);
+				} else if (pushInstruction instanceof LDC2_W) {
+					literalValue = ((LDC2_W) pushInstruction).getValue(cpgen);
+				}
+
+				// Assert that we've assigned a value to literalValue.
+				if (literalValue == null) {
+					System.err.format("FATAL: Could not obtain literal value for unknown type %s.\n", pushInstruction.getClass().getSimpleName());
+				}
+
+				System.out.format("pushInstruction: %s storeInstruction: %s index: %d value: %f\n", pushInstruction.getClass().getSimpleName(), storeInstruction.getClass().getSimpleName(), storeInstruction.getIndex(), literalValue.doubleValue());
+
+				// Store the literal value in the literalValues hashmap.
+				literalValues.put(storeInstruction.getIndex(), literalValue);
+			}
+
+			// Look for LoadInstruction and check if the index exists in the hashmap.
+			// If it does, replace the LoadInstruction with the literal value.
+			foldedLoadInstruction = false;
+			f = new InstructionFinder(il);
+			String pattern3 = "(DLOAD | FLOAD | ILOAD | LLOAD)";
+			for (Iterator it = f.search(pattern3); it.hasNext(); ) {
+				InstructionHandle[] match = (InstructionHandle[]) it.next();
+
+				// match[0] expected to be LoadInstruction, as specified in the pattern (it's the superclass of the specified pattern).
+				LoadInstruction loadInstruction = (LoadInstruction) match[0].getInstruction();
+
+				System.out.format("loadInstruction: %s index: %s\n", loadInstruction.getClass().getSimpleName(), loadInstruction.getIndex());
+
+				// Check if the index exists in the hashmap.
+				if (literalValues.containsKey(loadInstruction.getIndex())) {
+					// Yes, it does!
+					// Replace the LoadInstruction with the literal value.
+
+					Number literalValue = literalValues.get(loadInstruction.getIndex());
+
+					Instruction instructionAdded = null;
+
+					if (loadInstruction.getType(cpgen) == Type.INT) {
+						if (false && Math.abs(literalValue.intValue()) < Byte.MAX_VALUE) {
+							instructionAdded = new BIPUSH(literalValue.byteValue());
+						} else if (false && Math.abs(literalValue.intValue()) < Short.MAX_VALUE) {
+							instructionAdded = new SIPUSH(literalValue.shortValue());
+						} else {
+							// We need to add to the constant pool.
+							instructionAdded = new LDC(cpgen.addInteger(literalValue.intValue()));
+						}
+					} else if (loadInstruction.getType(cpgen) == Type.FLOAT) {
+						// Need to add to the constant pool.
+						instructionAdded = new LDC(cpgen.addFloat(literalValue.floatValue()));
+					} else if (loadInstruction.getType(cpgen) == Type.DOUBLE) {
+						// Need to add to the constant pool.
+						instructionAdded = new LDC2_W(cpgen.addDouble(literalValue.doubleValue()));
+					} else if (loadInstruction.getType(cpgen) == Type.LONG) {
+						// Need to add to the constant pool.
+						instructionAdded = new LDC2_W(cpgen.addLong(literalValue.longValue()));
+					}
+
+					// Assert that there's an instruction to add.
+					assert instructionAdded != null;
+
+					InstructionHandle instructionAddedHandle = il.insert(match[0], instructionAdded);
+
+					try {
+						// Delete old instructions (loadInstruction)
+						il.delete(match[0]);
+					} catch (TargetLostException e) {
+						for (InstructionHandle target : e.getTargets()) {
+							for (InstructionTargeter targeter : target.getTargeters()) {
+								targeter.updateTarget(target, instructionAddedHandle);
+							}
+						}
+						//e.printStackTrace();
+					}
+
+					foldedLoadInstruction = true;
+
+					System.out.format("Replaced %s %d with %s %f.\n", loadInstruction.getClass().getSimpleName(), loadInstruction.getIndex(), instructionAdded.getClass().getSimpleName(), literalValue.doubleValue());
+				}
+			}
+		} while (foldedLoadInstruction);
+
+//		// setPositions(true) checks whether jump handles
+//		// are all within the current method
+//		il.setPositions(true);
+//
+//		// Recompute max stack/locals.
+//		methodGen.setMaxStack();
+//		methodGen.setMaxLocals();
+//
+//		// Generate the new method.
+//		Method newMethod = methodGen.getMethod();
+//
+//		// Replace the method in the original class.
+//		cgen.replaceMethod(m, newMethod);
+//
+//		// Dispose so that instruction handles can be reused. (Just good practice.)
+//		il.dispose();
+	}*/
+
 
 	private void doConstantVariableFolding(ClassGen cgen, ConstantPoolGen cpgen, InstructionList instList){
 		InstructionHandle start = instList.getStart();
@@ -211,30 +397,32 @@ public class ConstantFolder
 		HashMap<Integer,Number> literalValues = new HashMap<>();
 		HashMap<Integer, Boolean> constantVars = new HashMap<>();
 
-		for(InstructionHandle handle: instList.getInstructionHandle()){
-			boolean isStore = false;
-			if (handle != null && (handle.getInstruction() instanceof StoreInstruction || handle.getInstruction() instanceof IINC){
-				isStore = true;
+
+		InstructionFinder finder = new InstructionFinder(instList);
+		String keyword = "StoreInstruction | IINC";
+		for (Iterator it = finder.search(keyword, start); it.hasNext();) {
+			InstructionHandle[] handles = (InstructionHandle[]) it.next();
+
+			if (handles[0].getPosition() > end.getPosition()) {
+				continue;
 			}
 
-			int localVarIndex = -1
+			int localIdx = -1;
 
-			if (isStore == true) {
-				if (handle.getInstruction() instanceof StoreInstruction) {
-					localVarIndex = ((StoreInstruction) handle.getInstruction()).getIndex();
-				} else if (handle.getInstruction() instanceof IINC) {
-					localVarIndex = ((IINC) handle.getInstruction()).getIndex();
-				}
+			if (handles[0].getInstruction() instanceof IINC) {
+				localIdx = ((IINC) handles[0].getInstruction()).getIndex();
+			} else if (handles[0].getInstruction() instanceof StoreInstruction) {
+				localIdx = ((StoreInstruction) handles[0].getInstruction()).getIndex();
 			}
 
-			if (localVarIndex == -1) {
-				System.err.println("FATAL: doConstantVariableFolding: localVariableIndex not assigned.");
+			if (localIdx == -1) {
+				System.err.println("FATAL: doConstantVariableFolding: localIdx not assigned.");
 			}
 
-			if (!constantVars.containsKey(localVarIndex)){
-				constantVars.put(localVarIndex, true);
-			}else {
-				constantVars.put(localVarIndex, false);
+			if (!constantVars.containsKey(localIdx)) {
+				constantVars.put(localIdx, true);
+			} else {
+				constantVars.put(localIdx, false);
 			}
 		}
 
@@ -244,55 +432,56 @@ public class ConstantFolder
 			String pattern = "(LDC | LDC2_W | LDC_W | ConstantPushInstruction) (DSTORE | FSTORE | ISTORE | LSTORE)";
 			folding = false;
 			doSimpleFolding(cgen,cpgen,instList);
-			InstructionFinder finder = new InstructionFinder(instList);
+			finder = new InstructionFinder(instList);
 
-			for (iterator it = finder.search(pattern); it.hasNext();){
+			for (Iterator it = finder.search(pattern); it.hasNext();){
 				InstructionHandle[] set = (InstructionHandle[]) it.next();
 				PushInstruction push = (PushInstruction) set[0].getInstruction();
 				StoreInstruction store = (StoreInstruction) set[1].getInstruction();
 				Number val = null;
 				//skip if store is not constant
-				if (!constantVariables.containsKey(store.getIndex()) || !constantVariables.get(store.getIndex())) {
+				if (!constantVars.containsKey(store.getIndex()) || !constantVars.get(store.getIndex())) {
 					continue;
 				}
 
 				if(push instanceof LDC){
-					val = (Number) ((LDC) pushInstruction).getValue(cpgen);
+					val = (Number) ((LDC) push).getValue(cpgen);
 				}
 				else if (push instanceof LDC2_W){
-					val = ((LDC2_W) pushInstruction).getValue(cpgen);
+					val = ((LDC2_W) push).getValue(cpgen);
 				}
 				else if (push instanceof ConstantPushInstruction){
-					val = ((ConstantPushInstruction) pushInstruction).getValue(cpgen);
+					val = ((ConstantPushInstruction) push).getValue();
 				}
 
 				if (val == null){
 					System.err.println("FATAL: Could not obtain literal value for unknown type");
 				}
 
-				literalValues.put(storeInstruction.getIndex(), val);
+				literalValues.put(store.getIndex(), val);
 			}
 
+			//finder = new InstructionFinder(instList);
 			String patternAlt = "(DLOAD | FLOAD | ILOAD | LLOAD)";
-			for (iterator itAlt = finder.search(patternAlt); it.hasNext();){
-				InstructionHandle[] set = (InstructionHandle[]) it.next();
+			for (Iterator itAlt = finder.search(patternAlt); itAlt.hasNext();) {
+				InstructionHandle[] set = (InstructionHandle[]) itAlt.next();
 
 				// set[0] expected to be LoadInstruction, as specified in the pattern (it's the superclass of the specified pattern).
 				LoadInstruction load = (LoadInstruction) set[0].getInstruction();
 
 				// Check if the index exists in the hashmap.
-				if (literalValues.containsKey(loadInstruction.getIndex())) {
+				if (literalValues.containsKey(load.getIndex())) {
 					Instruction added = null;
 
-					Number val = literalValues.get(loadInstruction.getIndex());
+					Number val = literalValues.get(load.getIndex());
 
-					if (loadInstruction.getType(cpgen) == Type.FLOAT) {
+					if (load.getType(cpgen) == Type.FLOAT) {
 						added = new LDC(cpgen.addFloat(val.floatValue()));
-					} else if (loadInstruction.getType(cpgen) == Type.DOUBLE) {
+					} else if (load.getType(cpgen) == Type.DOUBLE) {
 						added = new LDC2_W(cpgen.addDouble(val.doubleValue()));
-					} else if (loadInstruction.getType(cpgen) == Type.LONG) {
+					} else if (load.getType(cpgen) == Type.LONG) {
 						added = new LDC2_W(cpgen.addLong(val.longValue()));
-					} else if (loadInstruction.getType(cpgen) == Type.INT) {
+					} else if (load.getType(cpgen) == Type.INT) {
 						if (false && Math.abs(val.intValue()) < Byte.MAX_VALUE) {
 							added = new BIPUSH(val.byteValue());
 						} else if (false && Math.abs(val.intValue()) < Short.MAX_VALUE) {
@@ -305,7 +494,7 @@ public class ConstantFolder
 					// Assert that there's an instruction to add.
 					assert added != null;
 
-					InstructionHandle instructionAddedHandle = il.insert(set[0], added);
+					InstructionHandle instructionAddedHandle = instList.insert(set[0], added);
 
 					try {
 						// Delete old instructions (loadInstruction)
@@ -319,6 +508,7 @@ public class ConstantFolder
 					}
 					folding = true;
 				}
+			}
 		}
 	}
 
