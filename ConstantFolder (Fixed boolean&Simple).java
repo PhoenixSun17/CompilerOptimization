@@ -504,7 +504,7 @@ public class ConstantFolder
         if (inst instanceof IFLE) {
             Number value1 = constantStack.pop();
             return (Integer) value1 <= 0;
-			//IFLE only need one pop
+			//IFLE only needs one pop
         }
 
         Number first = constantStack.pop();
