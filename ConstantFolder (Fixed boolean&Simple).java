@@ -445,56 +445,56 @@ public class ConstantFolder
 		if (constantStack.size() < 2){ return; }
 		Number first = constantStack.pop();
 		Number second = constantStack.pop();
-		Number newValue = null;
+		Number result = null;
 		//Do calculation.
 		if (inst instanceof IADD) {
-			newValue = second.intValue() + first.intValue();
-			constantStack.push(newValue);
+			result = second.intValue() + first.intValue();
+			constantStack.push(result);
 		} else if (inst instanceof LADD) {
-			newValue = second.longValue() + first.longValue();
-			constantStack.push(newValue);
+			result = second.longValue() + first.longValue();
+			constantStack.push(result);
 		} else if (inst instanceof FADD) {
-			newValue = second.floatValue() + first.floatValue();
-			constantStack.push(newValue);
+			result = second.floatValue() + first.floatValue();
+			constantStack.push(result);
 		} else if (inst instanceof DADD) {
-			newValue = second.doubleValue() + first.doubleValue();
-			constantStack.push(newValue);
+			result = second.doubleValue() + first.doubleValue();
+			constantStack.push(result);
 		} else if (inst instanceof IMUL) {
-			newValue = second.intValue() * first.intValue();
-			constantStack.push(newValue);
+			result = second.intValue() * first.intValue();
+			constantStack.push(result);
 		} else if (inst instanceof LMUL) {
-			newValue = second.longValue() * first.longValue();
-			constantStack.push(newValue);
+			result = second.longValue() * first.longValue();
+			constantStack.push(result);
 		} else if (inst instanceof FMUL) {
-			newValue = second.floatValue() * first.floatValue();
-			constantStack.push(newValue);
+			result = second.floatValue() * first.floatValue();
+			constantStack.push(result);
 		} else if (inst instanceof DMUL) {
-			newValue = second.doubleValue() * first.doubleValue();
-			constantStack.push(newValue);
+			result = second.doubleValue() * first.doubleValue();
+			constantStack.push(result);
 		} else if (inst instanceof ISUB) {
-			newValue = second.intValue() - first.intValue();
-			constantStack.push(newValue);
+			result = second.intValue() - first.intValue();
+			constantStack.push(result);
 		} else if (inst instanceof LSUB) {
-			newValue = second.longValue() - first.longValue();
-			constantStack.push(newValue);
+			result = second.longValue() - first.longValue();
+			constantStack.push(result);
 		} else if (inst instanceof FSUB) {
-			newValue = second.floatValue() - first.floatValue();
-			constantStack.push(newValue);
+			result = second.floatValue() - first.floatValue();
+			constantStack.push(result);
 		} else if (inst instanceof DSUB) {
-			newValue = second.doubleValue() - first.doubleValue();
-			constantStack.push(newValue);
+			result = second.doubleValue() - first.doubleValue();
+			constantStack.push(result);
 		} else if (inst instanceof IDIV) {
-			newValue = second.intValue() / first.intValue();
-			constantStack.push(newValue);
+			result = second.intValue() / first.intValue();
+			constantStack.push(result);
 		} else if (inst instanceof LDIV) {
-			newValue = second.longValue() / first.longValue();
-			constantStack.push(newValue);
+			result = second.longValue() / first.longValue();
+			constantStack.push(result);
 		} else if (inst instanceof FDIV) {
-			newValue = second.floatValue() / first.floatValue();
-			constantStack.push(newValue);
+			result = second.floatValue() / first.floatValue();
+			constantStack.push(result);
 		} else if (inst instanceof DDIV) {
-			newValue = second.doubleValue() / first.doubleValue();
-			constantStack.push(newValue);
+			result = second.doubleValue() / first.doubleValue();
+			constantStack.push(result);
 		}
 	}
 
@@ -504,13 +504,14 @@ public class ConstantFolder
         if (inst instanceof IFLE) {
             Number value1 = constantStack.pop();
             return (Integer) value1 <= 0;
+			//IFLE only need one pop
         }
 
         Number first = constantStack.pop();
         Number second = constantStack.pop();
-
-        // identify what kind of operation it is, and then perform the op.
         boolean result = false;
+
+		//get the result of the comparison
         if (inst instanceof IF_ICMPEQ) {
             if (first.equals(second)) {
                 result = true;
