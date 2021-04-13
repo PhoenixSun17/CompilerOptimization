@@ -26,13 +26,6 @@ public class ConstantFolder
 	JavaClass optimized = null;
 
 	Stack<Number> constantStack = null;
-	HashMap<Integer, Number> vars = null;
-
-	public static final String OP_ADD = "add";
-	public static final String OP_SUB = "sub";
-	public static final String OP_MUL = "mul";
-	public static final String OP_DIV = "div";
-
 
 	public ConstantFolder(String classFilePath)
 	{
@@ -136,25 +129,15 @@ public class ConstantFolder
 		MethodGen mg = new MethodGen(method.getAccessFlags(), method.getReturnType(), method.getArgumentTypes(), null, method.getName(), cgen.getClassName(), instList, cpgen);
 
 		doSimpleFolding(cgen, cpgen, instList);
-		doConstantVariableFolding(cgen,cpgen,instList);
 
+		//Constant Var Folding is included in the DynamicFolding Method
+		//but it still provides result that keeps the folded
+		//doConstantVariableFolding(cgen,cpgen,instList);
+
+		doDynamicFolding(cgen,cpgen,instList);
 		removeunnecessaryLDCs(instList);
 		mg.removeNOPs();
-
-		constantStack = new Stack<Number>();
-		vars = new HashMap<Integer, Number>();
-
-		boolean skipNextArith = false;
-
-		boolean justDeletedIf = false;
-
-		int constants = 0;
-		ArrayList<Integer> arrayForLoops = findLoops(instList);
-
-		// InstructionHandle is a wrapper for actual Instructions
-
-		// setPositions(true) checks whether jump handles
-		// are all within the current method
+		//doDynamicFolding(cgen, cpgen, instList);
 		instList.setPositions(true);
 
 		// set max stack/local
@@ -170,8 +153,6 @@ public class ConstantFolder
 
 
 	private void doSimpleFolding(ClassGen cgen, ConstantPoolGen cpgen, InstructionList instList) {
-		System.out.println("* * Optimization 01: Simple Folding --------------");
-
 		constantStack = new Stack<Number>();
 		ArrayList<InstructionHandle> InstructionToRemove = new ArrayList<>();
 
@@ -193,7 +174,7 @@ public class ConstantFolder
 			}
 
 			Number constant = null;
-			//for simple folding, only LDC, LDC2_W, BIPUSH, SIPUSH and ConstantPush have to be considered.
+			//for simple folding, only LDC, LDC2_W, ConstantPush have to be considered.
 			if (inst instanceof LDC && nextMatches){
 				constant = (Number)((LDC)inst).getValue(cpgen);
 				constantStack.push(constant);
@@ -275,6 +256,7 @@ public class ConstantFolder
 					continue;
 					//do not consider loops
 				}
+
 				if (doLogicOp(handle)){
 					safelyDeleteInst(gotoHandle, ifTarget, instList);
 					safelyDeleteInst(handle, instList);
@@ -322,13 +304,166 @@ public class ConstantFolder
 		}
 	}
 
-	private void doConstantVariableFolding(ClassGen cgen, ConstantPoolGen cpgen, InstructionList instList){
+	private void doSimpleFolding(ClassGen cgen, ConstantPoolGen cpgen, InstructionList instList, InstructionHandle endHandle) {
+		//only fold part of the instructions
+		constantStack = new Stack<Number>();
+		ArrayList<InstructionHandle> InstructionToRemove = new ArrayList<>();
+		for (InstructionHandle handle:instList.getInstructionHandles()){
+			if (handle.equals(endHandle)){
+				break;
+			}
+			InstructionHandle next = handle.getNext();
+			Instruction inst = handle.getInstruction();
+			boolean nextMatches = false;
+			boolean isArithOp = inst instanceof ArithmeticInstruction;
+			boolean isCmp = inst instanceof IfInstruction;
+			boolean isLCMP = inst instanceof LCMP;
+			if (next == null){
+				nextMatches = false;
+			} else {
+				Instruction nextInst = next.getInstruction();
+				if (nextInst instanceof ConversionInstruction || nextInst instanceof LDC || nextInst instanceof LDC2_W || nextInst instanceof ConstantPushInstruction || nextInst instanceof ArithmeticInstruction || nextInst instanceof IfInstruction || nextInst instanceof LCMP){
+					nextMatches = true;
+					//Only consider the simplest case: 2 continueous LDCs followed with an arithmeticInstruction, LCMP or ifInstruction (might have conversion between them)
+				}
+			}
+
+			Number constant = null;
+			//for simple folding, only LDC, LDC2_W, ConstantPush have to be considered.
+			if (inst instanceof LDC && nextMatches){
+				constant = (Number)((LDC)inst).getValue(cpgen);
+				constantStack.push(constant);
+				//push the constant to the stack, when an arithmetical or logical operation is met, the top 2 constant will be pop from the stack.
+				InstructionToRemove.add(handle);
+			} else if (inst instanceof LDC2_W && nextMatches){
+				constant = (Number)((LDC2_W)inst).getValue(cpgen);
+				constantStack.push(constant);
+				InstructionToRemove.add(handle);
+			} else if (inst instanceof ConstantPushInstruction && nextMatches){
+				constant = ((ConstantPushInstruction)inst).getValue();
+				constantStack.push(constant);
+				InstructionToRemove.add(handle);
+			} else if (isArithOp){
+				if (constantStack.size() == 1){
+					constantStack.pop();
+					InstructionToRemove.clear();
+					continue;
+				} else if (constantStack.size() == 0) {
+					InstructionToRemove.clear();
+					continue;
+				}
+				//Avoid messing up the stack. This is because that store and load instructions are ignored.
+				doArithOp(inst);
+
+				for (InstructionHandle remove:InstructionToRemove){
+					safelyDeleteInst(remove, instList);
+					//remove the previous LDCs and Constantpushes that are already calculated.
+				}
+				Number result = constantStack.pop();
+
+				if (result instanceof Integer){
+					instList.insert(handle, new LDC(cpgen.addInteger((Integer)result)));
+					//Pre-compute these arithmetical instructions, and then replace the arithmetical instructions with LDCs.
+				} else if (result instanceof Float){
+					instList.insert(handle, new LDC(cpgen.addFloat((Float)result)));
+				} else if (result instanceof Double){
+					instList.insert(handle, new LDC2_W(cpgen.addDouble((Double)result)));
+				} else if (result instanceof Long){
+					instList.insert(handle, new LDC2_W(cpgen.addLong((Long)result)));
+				}
+				constantStack.push(result);
+				safelyDeleteInst(handle, instList);
+				InstructionToRemove.clear();
+			} else if (inst instanceof ConversionInstruction && nextMatches){
+				InstructionToRemove.add(handle);
+				//Delete the conversion, because the result is already calculated
+			} else if (isCmp){
+				if (constantStack.size() == 1 && !(inst instanceof IFLE)){
+					//IFLE is a special case to be considered because it only requires to pop one constant from the stack
+					constantStack.pop();
+					InstructionToRemove.clear();
+					continue;
+				} else if (constantStack.size() == 0) {
+					InstructionToRemove.clear();
+					continue;
+				}
+				InstructionHandle ifTarget = ((IfInstruction) handle.getInstruction()).getTarget();
+				InstructionHandle gotoHandle = handle.getNext();
+				while (!(gotoHandle.getInstruction() instanceof GOTO)){
+					gotoHandle = gotoHandle.getNext();
+					if (gotoHandle == null){
+						//goto not found, no else part
+						if (doLogicOp(handle)){
+							safelyDeleteInst(handle, instList);
+							//If the comparison succeed, remove the ifnstruction.
+						} else {
+							safelyDeleteInst(handle, ifTarget.getPrev(), instList);
+							//else remove the if part.
+						}
+					}
+				}
+
+				InstructionHandle gotoTarget = ((GotoInstruction) gotoHandle.getInstruction()).getTarget();
+
+				if (gotoTarget.getPosition() < gotoHandle.getPosition()){
+					constantStack.clear();
+					InstructionToRemove.clear();
+					continue;
+					//do not consider loops
+				}
+
+				if (doLogicOp(handle)){
+					safelyDeleteInst(gotoHandle, ifTarget, instList);
+					safelyDeleteInst(handle, instList);
+					//If the comparison succeed, remove the else part.
+				} else {
+					safelyDeleteInst(handle, gotoHandle, instList);
+					//else remove the if part.
+				}
+				for (InstructionHandle remove:InstructionToRemove){
+					safelyDeleteInst(remove, instList);
+				}
+				InstructionToRemove.clear();
+			} else if (isLCMP){
+				if (constantStack.size() == 1){
+					constantStack.pop();
+					InstructionToRemove.clear();
+					continue;
+				} else if (constantStack.size() == 0) {
+					InstructionToRemove.clear();
+					continue;
+				}
+
+				Number first = constantStack.pop();
+				Number second = constantStack.pop();
+				Number result;
+
+				if ((Long) first > (Long) second) {
+					result = 1;
+				} else if ((Long) first < (Long) second) {
+					result = -1;
+				} else {
+					result = 0;
+				}
+
+				constantStack.push(result);
+
+				for (InstructionHandle remove:InstructionToRemove){
+					safelyDeleteInst(remove, instList);
+				}
+
+				safelyDeleteInst(handle, instList);
+				InstructionToRemove.clear();
+
+			}
+		}
+	}
+
+	private HashMap<Integer, Boolean> findConstantVar(ClassGen cgen, ConstantPoolGen cpgen, InstructionList instList){
 		InstructionHandle start = instList.getStart();
 		InstructionHandle end = instList.getEnd();
 
-		HashMap<Integer,Number> literalValues = new HashMap<>();
-		HashMap<Integer, Boolean> constantVars = new HashMap<>();
-
+		HashMap<Integer, Boolean> Vars = new HashMap<>();
 
 		InstructionFinder finder = new InstructionFinder(instList);
 		String keyword = "StoreInstruction | IINC";
@@ -352,16 +487,29 @@ public class ConstantFolder
 				System.err.println("FATAL: doConstantVariableFolding: localIdx not assigned.");
 			}
 
-			if (!constantVars.containsKey(localIdx)) {
-				constantVars.put(localIdx, true);
+			if (!Vars.containsKey(localIdx)) {
+				Vars.put(localIdx, true);
 			} else {
-				constantVars.put(localIdx, false);
+				Vars.put(localIdx, false);
+				doDynamicFolding(cgen, cpgen, instList);
+				break;
+				//do dynamic only when dynamic variable is found
 			}
 		}
+		return Vars;
+	}
+
+
+	private void doConstantVariableFolding(ClassGen cgen, ConstantPoolGen cpgen, InstructionList instList){
+
+		HashMap<Integer,Number> literalValues = new HashMap<>();
+		HashMap<Integer, Boolean> constantVars = new HashMap<>();
+
+		constantVars = findConstantVar(cgen, cpgen, instList);
 
 		boolean folding = true;
 		while (folding){
-
+			InstructionFinder finder = new InstructionFinder(instList);
 			String pattern = "(LDC | LDC2_W | LDC_W | ConstantPushInstruction) (DSTORE | FSTORE | ISTORE | LSTORE)";
 			folding = false;
 			doSimpleFolding(cgen,cpgen,instList);
@@ -447,9 +595,121 @@ public class ConstantFolder
 		}
 	}
 
+	private HashMap<Integer, Boolean> findLoadStore(ClassGen cgen, ConstantPoolGen cpgen, InstructionList instList){
+		HashMap<Integer, Boolean> inLoop = new HashMap<>();
+		for (InstructionHandle handle:instList.getInstructionHandles()){
+			Instruction inst = handle.getInstruction();
+			if (inst instanceof GOTO){
+				if (((GotoInstruction)inst).getTarget().getPosition() < handle.getPosition()){
+					InstructionHandle inLoopLoad = ((GotoInstruction)inst).getTarget();
+					inLoop.put(((LoadInstruction)inLoopLoad.getInstruction()).getIndex(), true);
+					//find all load and store instructions that are used for loops, do not remove them.
+				}
+			}
+		}
+		return inLoop;
+	}
+
+	private void doDynamicFolding(ClassGen cgen, ConstantPoolGen cpgen, InstructionList instList){
+		HashMap<Integer, Boolean> inLoopLoadsAndStores = new HashMap<>();
+		HashMap<Integer, Number> variables = new HashMap<>();
+
+		inLoopLoadsAndStores = findLoadStore(cgen,cpgen,instList);
+
+		Stack<Number> constantStack = new Stack<>();
+		Stack<InstructionHandle> handlesToRemove = new Stack<>();
+		boolean optimisationEnds = false;
+
+		while(!optimisationEnds){
+
+			optimisationEnds = true;
+			//repeat until all the store and load instructions are removed
+
+			for (InstructionHandle handle:instList.getInstructionHandles()){
+				Instruction inst = handle.getInstruction();
+				InstructionHandle next = handle.getNext();
+				boolean nextIsStore = false;
+				boolean nextInLoop = false;
+
+				if (next != null){
+					Instruction nextInst = next.getInstruction();
+					if (nextInst instanceof StoreInstruction){
+						nextIsStore = true;
+						if (inLoopLoadsAndStores.containsKey(((StoreInstruction)nextInst).getIndex())){
+							nextInLoop = true;
+						}
+						//only consider those LDCs followed with a store instruction
+					}
+				}
+
+				if (inst instanceof LDC && nextIsStore && (!nextInLoop)){
+					Number constant = (Number)((LDC)inst).getValue(cpgen);
+					constantStack.push(constant);
+					//push the constant to the stack, pop one when a store is met.
+					handlesToRemove.push(handle);
+				} else if (inst instanceof LDC2_W && nextIsStore && (!nextInLoop)){
+					Number constant = (Number)((LDC2_W)inst).getValue(cpgen);
+					constantStack.push(constant);
+					handlesToRemove.push(handle);
+				} else if (inst instanceof ConstantPushInstruction && nextIsStore && (!nextInLoop)){
+					Number constant = ((ConstantPushInstruction)inst).getValue();
+					constantStack.push(constant);
+					handlesToRemove.push(handle);
+				}
+
+				if (inst instanceof StoreInstruction && !(inLoopLoadsAndStores.containsKey(((StoreInstruction)inst).getIndex()))){
+
+					if (constantStack.size() == 0){
+						optimisationEnds = false;
+						//Not yet able to get this store value, skip
+						doSimpleFolding(cgen, cpgen, instList, handle);
+						//fold the previous instructions
+						break;
+						//end this loop and start a new one
+					}
+
+					Number value = constantStack.pop();
+					int key = ((StoreInstruction)inst).getIndex();
+
+					if (variables.containsKey(key)){
+						variables.replace(key, value);
+						//replace the previous value
+					} else {
+						variables.put(key, value);
+					}
+					safelyDeleteInst(handlesToRemove.pop(), instList);
+					//remove the previous LDC used to store
+					safelyDeleteInst(handle, instList);
+					//remove the unnecessary store instruction
+				}
+
+				if (inst instanceof LoadInstruction && !(inst instanceof ALOAD) && !(inLoopLoadsAndStores.containsKey(((LoadInstruction)inst).getIndex()))){
+
+					int key = ((LoadInstruction)inst).getIndex();
+					Number value = variables.get(key);
+
+					if (value instanceof Integer){
+						instList.insert(handle, new LDC(cpgen.addInteger((Integer)value)));
+					} else if (value instanceof Float){
+						instList.insert(handle, new LDC(cpgen.addFloat((Float)value)));
+					} else if (value instanceof Double){
+						instList.insert(handle, new LDC2_W(cpgen.addDouble((Double)value)));
+					} else if (value instanceof Long){
+						instList.insert(handle, new LDC2_W(cpgen.addLong((Long)value)));
+					}
+					//replace the load instructions with LDCs
+					safelyDeleteInst(handle, instList);
+				}
+			}
+		}
+		doSimpleFolding(cgen, cpgen, instList);
+		removeunnecessaryLDCs(instList);
+		//After all store and load are removed, generally do a simple folding.
+		redirectTargetsInLoops(instList);
+		//Sometimes removing instructions could cause a ifInstruction of a loop to lose its target, fix it.
+	}
 
 	private void removeunnecessaryLDCs(InstructionList instList){
-		//
 		for (InstructionHandle handle:instList.getInstructionHandles()){
 			InstructionHandle next = handle.getNext();
 
@@ -564,6 +824,70 @@ public class ConstantFolder
 			}
 		}
 		return result;
+	}
+
+	public void redirectTargetsInLoops(InstructionList instList){
+		int loopCount = 0;
+		for (InstructionHandle handle:instList.getInstructionHandles()){
+			Instruction inst = handle.getInstruction();
+			if (inst instanceof GOTO){
+				loopCount++;
+				//record which goto it is, and find the corresponding if.
+				if (((GotoInstruction)inst).getTarget().getPosition() < handle.getPosition()){
+					int thisCount = loopCount;
+					InstructionHandle ifHandle = null;
+					InstructionHandle prev = handle.getPrev();
+					while (prev != null && thisCount > 0){
+						if (prev.getInstruction() instanceof IfInstruction){
+							ifHandle = prev;
+							thisCount--;
+						}
+						prev = prev.getPrev();
+					}
+					if (ifHandle != null){
+						Instruction ifInst = ifHandle.getInstruction();
+						//replace the old ifInstruction with a new one targeting the instruction next to the goto
+						if (ifInst instanceof IF_ICMPEQ){
+							instList.insert(ifHandle, new IF_ICMPEQ(handle.getNext()));
+							safelyDeleteInst(ifHandle, instList);
+						} else if(ifInst instanceof IF_ICMPGE){
+							instList.insert(ifHandle, new IF_ICMPGE(handle.getNext()));
+							safelyDeleteInst(ifHandle, instList);
+						} else if(ifInst instanceof IF_ICMPGT){
+							instList.insert(ifHandle, new IF_ICMPGT(handle.getNext()));
+							safelyDeleteInst(ifHandle, instList);
+						} else if(ifInst instanceof IF_ICMPLE){
+							instList.insert(ifHandle, new IF_ICMPLE(handle.getNext()));
+							safelyDeleteInst(ifHandle, instList);
+						} else if(ifInst instanceof IF_ICMPLT){
+							instList.insert(ifHandle, new IF_ICMPLT(handle.getNext()));
+							safelyDeleteInst(ifHandle, instList);
+						} else if(ifInst instanceof IF_ICMPNE){
+							instList.insert(ifHandle, new IF_ICMPNE(handle.getNext()));
+							safelyDeleteInst(ifHandle, instList);
+						} else if(ifInst instanceof IFEQ){
+							instList.insert(ifHandle, new IFEQ(handle.getNext()));
+							safelyDeleteInst(ifHandle, instList);
+						} else if(ifInst instanceof IFGE){
+							instList.insert(ifHandle, new IFGE(handle.getNext()));
+							safelyDeleteInst(ifHandle, instList);
+						} else if(ifInst instanceof IFGT){
+							instList.insert(ifHandle, new IFGT(handle.getNext()));
+							safelyDeleteInst(ifHandle, instList);
+						} else if(ifInst instanceof IFLE){
+							instList.insert(ifHandle, new IFLE(handle.getNext()));
+							safelyDeleteInst(ifHandle, instList);
+						} else if(ifInst instanceof IFLT){
+							instList.insert(ifHandle, new IFLT(handle.getNext()));
+							safelyDeleteInst(ifHandle, instList);
+						} else if(ifInst instanceof IFNE){
+							instList.insert(ifHandle, new IFNE(handle.getNext()));
+							safelyDeleteInst(ifHandle, instList);
+						}
+					}
+				}
+			}
+		}
 	}
 
 	public void write(String optimisedFilePath)
