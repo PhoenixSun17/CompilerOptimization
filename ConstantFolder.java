@@ -86,7 +86,7 @@ public class ConstantFolder
 	}
 
 	private void safelyDeleteInst(InstructionHandle handle1, InstructionHandle handle2, InstructionList instList){
-		//overloading method to deleted 2 handles
+		//overloading method to delete multiple handles
 		try {
 			instList.delete(handle1, handle2);
 		} catch (TargetLostException e) {
