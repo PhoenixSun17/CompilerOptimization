@@ -38,30 +38,6 @@ public class ConstantFolder
 		}
 	}
 
-	private ArrayList<Integer> findLoops(InstructionList instList)
-	{
-		ArrayList<Integer> loopPosition = new ArrayList<>();
-
-		for (InstructionHandle handle : instList.getInstructionHandles()) {
-			Instruction inst = handle.getInstruction();
-
-			if (inst instanceof IINC) {
-				InstructionHandle nextInstructionHandle = handle.getNext();
-				Instruction nextInstruction = nextInstructionHandle.getInstruction();
-				Integer index = ((IINC) inst).getIndex();
-				if (nextInstruction instanceof GotoInstruction) {
-					InstructionHandle targetHandle = ((GotoInstruction) nextInstruction).getTarget();
-					Integer start = targetHandle.getPosition() - 2;
-					loopPosition.add(start);
-					loopPosition.add(nextInstructionHandle.getPosition());
-					loopPosition.add(index);
-				}
-			}
-
-		}
-		return loopPosition;
-	}
-
 	private void safelyDeleteInst(InstructionHandle handle, InstructionList instList){
 		//Delete Dead instructions without raising exceptions
 		try {
@@ -136,7 +112,6 @@ public class ConstantFolder
 
 		doDynamicFolding(cgen,cpgen,instList);
 		removeunnecessaryLDCs(instList);
-		mg.removeNOPs();
 		//doDynamicFolding(cgen, cpgen, instList);
 		instList.setPositions(true);
 
